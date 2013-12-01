@@ -598,7 +598,7 @@ func (snapshot *Snapshot) Set(keyBytes *[KEY_BYTES]byte, value *[HASH_BYTES]byte
 func (snapshot *Snapshot) GetRootHash() (*[HASH_BYTES]byte, error) {
 	if snapshot.Id == 0 {
 		// zero nodes
-		return nil, nil
+		return new([HASH_BYTES]byte), nil
 	}
 	snapshot.openFile()
 	defer snapshot.closeFile()
