@@ -1,4 +1,4 @@
-package main
+package merklemap
 
 import (
 	"crypto/sha256"
