@@ -31,7 +31,7 @@ func TestRandomly(t *testing.T) {
 		} else {
 			itCount = 100
 		}
-		time := mapTest(tree, itCount, (1+rand.Intn(256))*randSign)
+		time := mapTest(tree, itCount, (1+rand.Intn(256))*randSign, 3)
 		fmt.Printf("seed %x: %v\n", i, time)
 		if time < bestTime {
 			bestTime = time
@@ -42,15 +42,15 @@ func TestRandomly(t *testing.T) {
 }
 
 func BenchmarkBigTree(b *testing.B) {
-	rand.Seed(0x77)
+	rand.Seed(0x7777)
 	tree, err := Open("tree.dat")
 	if err != nil {
 		panic(err)
 	}
-	mapTest(tree, 100000, 256)
+	mapTest(tree, 1000000, 256, 2)
 }
 
-func mapTest(tree *Map, itCount int, byteRange int) int {
+func mapTest(tree *Map, itCount int, byteRange int, opn int) int {
 	bytez := func(b byte) [32]byte {
 		var bytes [32]byte
 		for i := range bytes {
@@ -75,6 +75,10 @@ func mapTest(tree *Map, itCount int, byteRange int) int {
 		}
 	}
 	snapshot := tree.GetSnapshot(0)
+	handle, err := snapshot.OpenHandle()
+	if err != nil {
+		panic(err)
+	}
 	refMap := map[[32]byte][32]byte{}
 	refMapKeys := [][32]byte{}
 	randMapKey := func() [32]byte {
@@ -93,7 +97,7 @@ func mapTest(tree *Map, itCount int, byteRange int) int {
 		if dbg > 1 {
 			fmt.Fprintf(os.Stdout, "set: [%x] = %x...\n", key, val)
 		}
-		err := snapshot.Set(&key, &val)
+		err := handle.Set(&key, &val)
 		if err != nil {
 			panic(err)
 		}
@@ -105,7 +109,7 @@ func mapTest(tree *Map, itCount int, byteRange int) int {
 		if dbg > 2 {
 			fmt.Fprintf(os.Stdout, "read [%x]...\n", key)
 		}
-		result, err := snapshot.GetPath(&key)
+		result, err := handle.GetPath(&key)
 		if err != nil {
 			panic(err)
 		}
@@ -113,7 +117,7 @@ func mapTest(tree *Map, itCount int, byteRange int) int {
 		if result == nil {
 			val = [32]byte{}
 		} else {
-			rootHash, err := snapshot.GetRootHash()
+			rootHash, err := handle.GetRootHash()
 			if err != nil {
 				panic(err)
 			}
@@ -135,13 +139,13 @@ func mapTest(tree *Map, itCount int, byteRange int) int {
 		if i%1000 == 0 {
 			fmt.Printf("operation %v\n", i)
 		}
-		switch rand.Intn(3) {
+		switch rand.Intn(opn) {
 		case 0:
 			k := randBytes()
 			v := randBytes()
 			refSet(k, v)
 			treeSet(k, v)
-		case 1:
+		case 2:
 			k := randBytes()
 			v1 := refGet(k)
 			v2 := treeGet(k)
@@ -151,7 +155,7 @@ func mapTest(tree *Map, itCount int, byteRange int) int {
 			if v1 != v2 {
 				panic("wrong 1")
 			}
-		case 2:
+		case 1:
 			if len(refMap) > 0 {
 				k := randMapKey()
 				v1 := refGet(k)
@@ -164,8 +168,18 @@ func mapTest(tree *Map, itCount int, byteRange int) int {
 				}
 				if v1 != v2 {
 					panic(fmt.Sprintf("wrong 2 (t%v)", i))
-					//return i
 				}
+			}
+		}
+		if rand.Intn(100) == 0 {
+			newSnapshot, err := handle.FinishUpdate()
+			if err != nil {
+				panic(err)
+			}
+			snapshot = newSnapshot
+			handle, err = snapshot.OpenHandle()
+			if err != nil {
+				panic(err)
 			}
 		}
 	}

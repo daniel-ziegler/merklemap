@@ -211,51 +211,59 @@ func (n *node) toDisk() *diskNode {
 	return dn
 }
 
-func (snapshot *Snapshot) clear() error {
-	_, err := snapshot.file.Seek(0, os.SEEK_SET)
+func (handle *Handle) clear() error {
+	_, err := handle.file.Seek(0, os.SEEK_SET)
 	if err != nil {
 		return err
 	}
 	var header header
 	header.NrNodes = 0
-	err = header.Write(snapshot.file)
+	err = header.Write(handle.file)
 	if err != nil {
 		return err
 	}
-	offset, err := snapshot.file.Seek(0, os.SEEK_CUR)
+	offset, err := handle.file.Seek(0, os.SEEK_CUR)
 	if err != nil {
 		return err
 	}
-	err = snapshot.file.Truncate(offset)
+	err = handle.file.Truncate(offset)
 	return err
 }
 
 func Open(fileName string) (*Map, error) {
 	tree := new(Map)
 	tree.fileName = fileName
-	snapshot := tree.GetSnapshot(-1)
-	err := snapshot.openFile()
+	handle, err := tree.GetSnapshot(-1).OpenHandle()
 	if err != nil {
 		return nil, err
 	}
-	defer snapshot.closeFile()
+	defer handle.Close()
+	// Test to see if the file exists in a usable form by reading its header
 	header := new(header)
-	err = binary.Read(snapshot.file, binary.LittleEndian, header)
+	err = binary.Read(handle.file, binary.LittleEndian, header)
 	if err != nil {
 		// Initialize file
-		return tree, snapshot.clear()
+		err := handle.clear()
+		if err != nil {
+			return nil, err
+		}
+		_, err = handle.FinishUpdate()
+		if err != nil {
+			return nil, err
+		}
+		return tree, nil
 	} else {
 		return tree, nil
 	}
 }
 
-func (snapshot *Snapshot) readNode(nodeIx int64, keyOffset int) (*node, error) {
+func (handle *Handle) readNode(nodeIx int64, keyOffset int) (*node, error) {
 	dn := new(diskNode)
-	_, err := snapshot.file.Seek(int64(HEADER_SIZE+NODE_SIZE*(nodeIx-1)), os.SEEK_SET)
+	_, err := handle.file.Seek(int64(HEADER_SIZE+NODE_SIZE*(nodeIx-1)), os.SEEK_SET)
 	if err != nil {
 		return nil, err
 	}
-	err = binary.Read(snapshot.file, binary.LittleEndian, dn)
+	err = binary.Read(handle.file, binary.LittleEndian, dn)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +271,7 @@ func (snapshot *Snapshot) readNode(nodeIx int64, keyOffset int) (*node, error) {
 		fmt.Fprintf(os.Stdout, " read %x: %x\n", nodeIx, dn)
 	}
 	// debug check
-	header, err := snapshot.readHeader()
+	header, err := handle.readHeader()
 	if err != nil {
 		panic(err)
 	}
@@ -276,50 +284,50 @@ func (snapshot *Snapshot) readNode(nodeIx int64, keyOffset int) (*node, error) {
 	return n, nil
 }
 
-func (snapshot *Snapshot) writeNode(node *node) error {
+func (handle *Handle) writeNode(node *node) error {
 	if dbg > 2 {
 		fmt.Fprintf(os.Stdout, " write %x: %x\n", node.Index, node)
 	}
-	_, err := snapshot.file.Seek(int64(HEADER_SIZE+NODE_SIZE*(node.Index-1)), os.SEEK_SET)
+	_, err := handle.file.Seek(int64(HEADER_SIZE+NODE_SIZE*(node.Index-1)), os.SEEK_SET)
 	if err != nil {
 		return err
 	}
 	dn := node.toDisk()
-	err = binary.Write(snapshot.file, binary.LittleEndian, dn)
+	err = binary.Write(handle.file, binary.LittleEndian, dn)
 	if err != nil {
 		return err
 	}
 	padding := NODE_SIZE - binary.Size(dn)
-	_, err = snapshot.file.Write(make([]byte, padding))
+	_, err = handle.file.Write(make([]byte, padding))
 	return err
 }
 
-func (snapshot *Snapshot) readHeader() (*header, error) {
-	_, err := snapshot.file.Seek(0, os.SEEK_SET)
+func (handle *Handle) readHeader() (*header, error) {
+	_, err := handle.file.Seek(0, os.SEEK_SET)
 	if err != nil {
 		return nil, err
 	}
 	header := new(header)
-	err = binary.Read(snapshot.file, binary.LittleEndian, header)
+	err = binary.Read(handle.file, binary.LittleEndian, header)
 	if err != nil {
 		return nil, err
 	}
 	return header, nil
 }
 
-func (snapshot *Snapshot) writeHeader(header *header) error {
-	_, err := snapshot.file.Seek(0, os.SEEK_SET)
+func (handle *Handle) writeHeader(header *header) error {
+	_, err := handle.file.Seek(0, os.SEEK_SET)
 	if err != nil {
 		return err
 	}
-	return binary.Write(snapshot.file, binary.LittleEndian, header)
+	return binary.Write(handle.file, binary.LittleEndian, header)
 }
 
-func (snapshot *Snapshot) allocNode() (int64, error) {
-	snapshot.tree.allocMutex.Lock()
-	defer snapshot.tree.allocMutex.Unlock()
+func (handle *Handle) allocNode() (int64, error) {
+	handle.tree.allocMutex.Lock()
+	defer handle.tree.allocMutex.Unlock()
 	// read current number of nodes
-	header, err := snapshot.readHeader()
+	header, err := handle.readHeader()
 	if err != nil {
 		return -1, err
 	}
@@ -327,7 +335,7 @@ func (snapshot *Snapshot) allocNode() (int64, error) {
 	header.NrNodes++
 	newIndex := header.NrNodes
 	// write back increased number of nodes
-	err = snapshot.writeHeader(header)
+	err = handle.writeHeader(header)
 	if err != nil {
 		return -1, err
 	}
@@ -335,8 +343,8 @@ func (snapshot *Snapshot) allocNode() (int64, error) {
 }
 
 // Note: doesn't write the node onto disk yet
-func (snapshot *Snapshot) newNode(keyOffset int) (*node, error) {
-	ix, err := snapshot.allocNode()
+func (handle *Handle) newNode(keyOffset int) (*node, error) {
+	ix, err := handle.allocNode()
 	if err != nil {
 		return nil, err
 	}
@@ -366,15 +374,15 @@ func firstMismatch(slice1 []byte, slice2 []byte) int {
 }
 
 // returns (nodes on matching path, position of last node, mismatch position in last node, error)
-func (snapshot *Snapshot) partialLookup(key []byte) ([]*node, int, int, error) {
+func (handle *Handle) partialLookup(key []byte) ([]*node, int, int, error) {
 	if dbg > 1 {
 		fmt.Fprintf(os.Stdout, "partialLookup(%x)\n", key)
 	}
-	if snapshot.Id == 0 {
+	if handle.root == 0 {
 		// no root, empty tree
 		return nil, 0, 0, nil
 	}
-	root, err := snapshot.readNode(snapshot.Id, 0)
+	root, err := handle.readNode(handle.root, 0)
 	if err != nil {
 		return nil, 0, 0, err
 	}
@@ -414,7 +422,7 @@ func (snapshot *Snapshot) partialLookup(key []byte) ([]*node, int, int, error) {
 			return nodes, pos - len(n.KeySubstring), len(n.KeySubstring), nil
 		} else {
 			pos++
-			n, err = snapshot.readNode(n.Children[childIx], pos)
+			n, err = handle.readNode(n.Children[childIx], pos)
 			nodes = append(nodes, n)
 			if err != nil {
 				return nil, 0, 0, err
@@ -423,14 +431,9 @@ func (snapshot *Snapshot) partialLookup(key []byte) ([]*node, int, int, error) {
 	}
 }
 
-func (snapshot *Snapshot) GetPath(keyBytes *[KEY_BYTES]byte) (*LookupResult, error) {
-	err := snapshot.openFile()
-	if err != nil {
-		return nil, err
-	}
-	defer snapshot.closeFile()
+func (handle *Handle) GetPath(keyBytes *[KEY_BYTES]byte) (*LookupResult, error) {
 	key := bytesToElements(keyBytes[:])
-	nodes, pos, _, err := snapshot.partialLookup(key)
+	nodes, pos, _, err := handle.partialLookup(key)
 	if err != nil {
 		return nil, err
 	}
@@ -464,25 +467,21 @@ func (snapshot *Snapshot) GetPath(keyBytes *[KEY_BYTES]byte) (*LookupResult, err
 		}
 	}
 	result := &LookupResult{leafData: nodes[len(nodes)-1].leafData, SiblingHashes: pathHashes}
-	err = snapshot.closeFile()
-	if err != nil {
-		return nil, err
-	}
 	return result, nil
 }
 
-func (snapshot *Snapshot) updatePath(path []*node) error {
+func (handle *Handle) updatePath(path []*node) error {
 	for {
-		ix, err := snapshot.allocNode()
+		ix, err := handle.allocNode()
 		if err != nil {
 			return err
 		}
 		n := path[len(path)-1]
 		oldix := n.Index
 		n.Index = ix
-		snapshot.writeNode(n)
+		handle.writeNode(n)
 		if len(path) == 1 {
-			snapshot.Id = ix
+			handle.root = ix
 			return nil
 		} else {
 			parent := path[len(path)-2]
@@ -503,31 +502,28 @@ func (snapshot *Snapshot) updatePath(path []*node) error {
 	}
 }
 
-func (snapshot *Snapshot) Set(keyBytes *[KEY_BYTES]byte, value *[HASH_BYTES]byte) error {
+func (handle *Handle) Set(keyBytes *[KEY_BYTES]byte, value *[HASH_BYTES]byte) error {
 	key := bytesToElements(keyBytes[:])
 
 	data := &leafData{Value: *value, Hash: *Hash(append(keyBytes[:], value[:]...))}
 
-	snapshot.openFile()
-	defer snapshot.closeFile()
-
-	nodes, pos, mismatchPos, err := snapshot.partialLookup(key)
+	nodes, pos, mismatchPos, err := handle.partialLookup(key)
 	if err != nil {
 		return err
 	}
 	if len(nodes) == 0 {
 		// Create root node
-		rootNode, err := snapshot.newNode(0)
+		rootNode, err := handle.newNode(0)
 		if err != nil {
 			return err
 		}
 		rootNode.leafData = *data
 		rootNode.KeySubstring = key
-		err = snapshot.writeNode(rootNode)
+		err = handle.writeNode(rootNode)
 		if err != nil {
 			return err
 		}
-		snapshot.Id = rootNode.Index
+		handle.root = rootNode.Index
 		return nil
 	} else {
 		lastNode := nodes[len(nodes)-1]
@@ -539,7 +535,7 @@ func (snapshot *Snapshot) Set(keyBytes *[KEY_BYTES]byte, value *[HASH_BYTES]byte
 			lastNode.leafData = *data
 		} else {
 			// Make new child node
-			newNode, err := snapshot.newNode(pos + mismatchPos + 1)
+			newNode, err := handle.newNode(pos + mismatchPos + 1)
 			if err != nil {
 				return err
 			}
@@ -555,7 +551,7 @@ func (snapshot *Snapshot) Set(keyBytes *[KEY_BYTES]byte, value *[HASH_BYTES]byte
 					fmt.Fprintf(os.Stdout, " split at %v+%v\n", pos, mismatchPos)
 				}
 				// Split node: allocate second child node
-				splitNode, err := snapshot.newNode(pos + mismatchPos + 1)
+				splitNode, err := handle.newNode(pos + mismatchPos + 1)
 				if err != nil {
 					return err
 				}
@@ -576,33 +572,26 @@ func (snapshot *Snapshot) Set(keyBytes *[KEY_BYTES]byte, value *[HASH_BYTES]byte
 
 				lastNode.KeySubstring = oldSubstr[:mismatchPos]
 
-				err = snapshot.writeNode(splitNode)
+				err = handle.writeNode(splitNode)
 				if err != nil {
 					return err
 				}
 			}
-			err = snapshot.writeNode(newNode)
+			err = handle.writeNode(newNode)
 			if err != nil {
 				return err
 			}
 		}
-		snapshot.updatePath(nodes)
+		return handle.updatePath(nodes)
 	}
-	err = snapshot.file.Sync()
-	if err != nil {
-		return err
-	}
-	return snapshot.closeFile()
 }
 
-func (snapshot *Snapshot) GetRootHash() (*[HASH_BYTES]byte, error) {
-	if snapshot.Id == 0 {
+func (handle *Handle) GetRootHash() (*[HASH_BYTES]byte, error) {
+	if handle.root == 0 {
 		// zero nodes
 		return new([HASH_BYTES]byte), nil
 	}
-	snapshot.openFile()
-	defer snapshot.closeFile()
-	n, err := snapshot.readNode(snapshot.Id, 0)
+	n, err := handle.readNode(handle.root, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -647,33 +636,49 @@ func (lookup *LookupResult) ComputeRootHash() []byte {
 
 type Snapshot struct {
 	tree *Map
+	root int64
+}
+
+type Handle struct {
+	tree *Map
 	file *os.File
-	Id   int64
+	root int64
 }
 
-func (snapshot *Snapshot) openFile() error {
-	if snapshot.file != nil {
-		return &MapError{"Snapshot file already open"}
-	}
-	fi, err := os.OpenFile("tree.dat", os.O_RDWR|os.O_CREATE, 0600)
+func (snapshot *Snapshot) OpenHandle() (*Handle, error) {
+	fi, err := os.OpenFile(snapshot.tree.fileName, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	snapshot.file = fi
-	return nil
+	return &Handle{tree: snapshot.tree, file: fi, root: snapshot.root}, nil
 }
 
-func (snapshot *Snapshot) closeFile() error {
-	if snapshot.file == nil {
-		return nil
+// Closes the handle after read operations (you could have done writes, but
+// without getting back a new snapshot, they would be useless)
+// Note: idempotent (can be called repeatedly without problems)
+func (handle *Handle) Close() error {
+	return handle.file.Close()
+}
+
+// Closes the handle after some update operations
+func (handle *Handle) FinishUpdate() (*Snapshot, error) {
+	// Sync the file: we want to make sure snapshots are only visible once they've
+	// been properly committed to disk
+	err := handle.file.Sync()
+	if err != nil {
+		return nil, err
 	}
-	err := snapshot.file.Close()
-	snapshot.file = nil
-	return err
+	err = handle.Close()
+	if err != nil {
+		return nil, err
+	}
+	return &Snapshot{tree: handle.tree, root: handle.root}, nil
 }
 
 func (tree *Map) GetSnapshot(id int64) *Snapshot {
-	return &Snapshot{tree: tree, Id: id}
+	return &Snapshot{tree: tree, root: id}
 }
 
-
+func (snapshot *Snapshot) GetId() int64 {
+	return snapshot.root
+}
