@@ -380,7 +380,10 @@ func (lr *LookupResult) AsProto() *LookupResultPb {
 }
 
 func (lr *LookupResult) ProtoMessage() {}
-func (lr *LookupResult) Reset() {panic(0)}
+
+func (lr *LookupResult) Reset() {
+	*lr = LookupResult{}
+}
 
 func (lr *LookupResult) String() string {
 	return lr.AsProto().String()
