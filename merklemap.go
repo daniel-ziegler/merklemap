@@ -451,13 +451,13 @@ func (handle *Handle) partialLookup(key []byte) ([]*node, int, int, error) {
 				return nodes, pos, mismatchPos, nil
 			}
 			pos += len(n.KeySubstring)
-			if pos == KEY_ELEMENTS {
-				// Full match
-				return nodes, KEY_ELEMENTS, 0, nil
-			}
-			if pos > KEY_ELEMENTS {
-				return nil, 0, 0, &MapError{"corrupted tree: key too long"}
-			}
+		}
+		if pos == KEY_ELEMENTS {
+			// Full match
+			return nodes, KEY_ELEMENTS, 0, nil
+		}
+		if pos > KEY_ELEMENTS {
+			return nil, 0, 0, &MapError{"corrupted tree: key too long"}
 		}
 		// Then, index into the children
 		childIx := key[pos]

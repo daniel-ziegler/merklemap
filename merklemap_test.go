@@ -63,6 +63,7 @@ func mapTest(tree *Map, itCount int, byteRange int, opn int) int {
 		if byteRange < 0 {
 			bs = bytez(byte(rand.Intn(-byteRange)))
 			bs[0] = byte(rand.Intn(-byteRange))
+			bs[31] = byte(rand.Intn(-byteRange))
 			return bs
 		} else {
 			for i := range bs {
