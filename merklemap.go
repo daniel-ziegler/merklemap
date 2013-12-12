@@ -365,18 +365,29 @@ type LookupResult struct {
 	SiblingHashes []SiblingHash
 }
 
-func (lr *LookupResult) Marshal() (ret []byte, err error) {
+func (lr *LookupResult) AsProto() *LookupResultPb {
 	siblingParities := make([]bool, len(lr.SiblingHashes))
 	siblingHashes := make([][]byte, len(lr.SiblingHashes))
 	for i, sh_s := range lr.SiblingHashes {
 		siblingParities[i] = sh_s.IsLeftSibling
 		siblingHashes[i] = sh_s.Hash
 	}
-	ret, err = proto.Marshal(&LookupResultPb{
+	return &LookupResultPb{
 		LeafValue: lr.Value[:],
 		LeafKVHash: lr.Hash[:],
 		IsLeftSibling: siblingParities,
-		SiblingHash: siblingHashes})
+		SiblingHash: siblingHashes}
+}
+
+func (lr *LookupResult) ProtoMessage() {}
+func (lr *LookupResult) Reset() {panic(0)}
+
+func (lr *LookupResult) String() string {
+	return lr.AsProto().String()
+}
+
+func (lr *LookupResult) Marshal() (ret []byte, err error) {
+	ret, err = proto.Marshal(lr.AsProto())
 	return
 }
 
