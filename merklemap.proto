@@ -1,0 +1,8 @@
+package merklemap;
+
+message LookupResultPb {
+	optional bytes leaf_value = 1;
+	optional bytes leaf_k_v_hash = 2;
+	repeated bool  is_left_sibling = 3;
+	repeated bytes sibling_hash = 4;
+}

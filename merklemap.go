@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"sync"
+	"errors"
+	"code.google.com/p/goprotobuf/proto"
 )
 
 const dbg = 0
@@ -361,6 +363,40 @@ type SiblingHash struct {
 type LookupResult struct {
 	leafData
 	SiblingHashes []SiblingHash
+}
+
+func (lr *LookupResult) Marshal() (ret []byte, err error) {
+	siblingParities := make([]bool, len(lr.SiblingHashes))
+	siblingHashes := make([][]byte, len(lr.SiblingHashes))
+	for i, sh_s := range lr.SiblingHashes {
+		siblingParities[i] = sh_s.IsLeftSibling
+		siblingHashes[i] = sh_s.Hash
+	}
+	ret, err = proto.Marshal(&LookupResultPb{
+		LeafValue: lr.Value[:],
+		LeafKVHash: lr.Hash[:],
+		IsLeftSibling: siblingParities,
+		SiblingHash: siblingHashes})
+	return
+}
+
+func (lr *LookupResult) Unmarshal(bs []byte) (err error) {
+	pb := new(LookupResultPb)
+	err = proto.Unmarshal(bs, pb)
+	if err != nil {
+		return
+	}
+	if len(pb.SiblingHash) != len(pb.IsLeftSibling) {
+		return errors.New("len(pb.SiblingHash) != len(pb.IsLeftSibling)")
+	}
+	lr.SiblingHashes = make([]SiblingHash, len(pb.SiblingHash))
+	for i := range pb.SiblingHash {
+		lr.SiblingHashes[i].IsLeftSibling = pb.IsLeftSibling[i]
+		lr.SiblingHashes[i].Hash = pb.SiblingHash[i]
+	}
+	copy(lr.Value[:], pb.LeafValue[:len(lr.Value)])
+	copy(lr.Hash[:], pb.LeafKVHash[:len(lr.Hash)])
+	return nil
 }
 
 func firstMismatch(slice1 []byte, slice2 []byte) int {
