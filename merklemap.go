@@ -11,8 +11,6 @@ import (
 	"code.google.com/p/goprotobuf/proto"
 )
 
-const dbg = 0
-
 func assert(flag bool) {
 	if !flag {
 		panic("assertion failed")
@@ -70,9 +68,6 @@ func Hash(data []byte) *[HASH_BYTES]byte {
 	hash.Write(data)
 	hashVal := new([HASH_BYTES]byte)
 	copy(hashVal[:], hash.Sum(make([]byte, 0)))
-	if dbg > 0 {
-		fmt.Fprintf(os.Stdout, "Hash(%x) = %x\n", data, hashVal)
-	}
 	return hashVal
 }
 
@@ -269,9 +264,6 @@ func (handle *Handle) readNode(nodeIx int64, keyOffset int) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
-	if dbg > 2 {
-		fmt.Fprintf(os.Stdout, " read %x: %x\n", nodeIx, dn)
-	}
 	// debug check
 	header, err := handle.readHeader()
 	if err != nil {
@@ -287,9 +279,6 @@ func (handle *Handle) readNode(nodeIx int64, keyOffset int) (*node, error) {
 }
 
 func (handle *Handle) writeNode(node *node) error {
-	if dbg > 2 {
-		fmt.Fprintf(os.Stdout, " write %x: %x\n", node.Index, node)
-	}
 	_, err := handle.file.Seek(int64(HEADER_SIZE+NODE_SIZE*(node.Index-1)), os.SEEK_SET)
 	if err != nil {
 		return err
@@ -356,7 +345,6 @@ func (handle *Handle) newNode(keyOffset int) (*node, error) {
 
 type SiblingHash struct {
 	Hash          []byte
-	KeyOffset     int
 	IsLeftSibling bool // whether the hashed sibling was to the left of the original node on the path
 }
 
@@ -380,7 +368,6 @@ func (lr *LookupResult) AsProto() *LookupResultPb {
 }
 
 func (lr *LookupResult) ProtoMessage() {}
-
 func (lr *LookupResult) Reset() {
 	*lr = LookupResult{}
 }
@@ -425,9 +412,6 @@ func firstMismatch(slice1 []byte, slice2 []byte) int {
 
 // returns (nodes on matching path, position of last node, mismatch position in last node, error)
 func (handle *Handle) partialLookup(key []byte) ([]*node, int, int, error) {
-	if dbg > 1 {
-		fmt.Fprintf(os.Stdout, "partialLookup(%x)\n", key)
-	}
 	if handle.root == 0 {
 		// no root, empty tree
 		return nil, 0, 0, nil
@@ -448,9 +432,6 @@ func (handle *Handle) partialLookup(key []byte) ([]*node, int, int, error) {
 			mismatchPos = firstMismatch(keySubstr, nodeSubstr)
 			if mismatchPos != len(n.KeySubstring) {
 				// Mismatch in the middle of the edge
-				if dbg > 2 {
-					fmt.Fprintf(os.Stdout, "partialLookup(%x) midsmatch %x+%x\n", key, pos, mismatchPos)
-				}
 				return nodes, pos, mismatchPos, nil
 			}
 			pos += len(n.KeySubstring)
@@ -466,9 +447,6 @@ func (handle *Handle) partialLookup(key []byte) ([]*node, int, int, error) {
 		childIx := key[pos]
 		if n.Children[childIx] == 0 {
 			// Mismatch at the end of the edge
-			if dbg > 2 {
-				fmt.Fprintf(os.Stdout, "partialLookup(%x) endsmatch %x\n", key, pos)
-			}
 			return nodes, pos - len(n.KeySubstring), len(n.KeySubstring), nil
 		} else {
 			pos++
@@ -491,7 +469,7 @@ func (handle *Handle) GetPath(keyBytes *[KEY_BYTES]byte) (*LookupResult, error) 
 		return nil, nil
 	}
 	pathHashes := make([]SiblingHash, 0)
-	for i, n := range nodes {
+	for _, n := range nodes {
 		for j := 0; j < ELEMENT_BITS; j++ {
 			keyIx := n.KeyOffset + len(n.KeySubstring)
 			if keyIx == KEY_ELEMENTS {
@@ -503,13 +481,7 @@ func (handle *Handle) GetPath(keyBytes *[KEY_BYTES]byte) (*LookupResult, error) 
 			if hashNode.HasTwoChildren {
 				siblingSide := int(1 - ((elem >> uint(ELEMENT_BITS-j-1)) & 1))
 				siblingNode := n.getHashNode(hnIx*2 + 1 + siblingSide)
-				if dbg > 1 {
-					side := 1 - siblingSide
-					node := n.getHashNode(hnIx*2 + 1 + side)
-					fmt.Fprintf(os.Stdout, "lookup %x/%x: %x %x %x !%4b[%x]=%x\n", keyBytes, i, hashNode, siblingNode, node, elem, j, siblingSide)
-				}
 				pathHashes = append(pathHashes, SiblingHash{
-					KeyOffset:     n.KeyOffset + j,
 					Hash:          siblingNode.Hash,
 					IsLeftSibling: siblingSide == 0,
 				})
@@ -579,9 +551,6 @@ func (handle *Handle) Set(keyBytes *[KEY_BYTES]byte, value *[HASH_BYTES]byte) er
 		lastNode := nodes[len(nodes)-1]
 		if pos == KEY_ELEMENTS {
 			// Update leaf node
-			if dbg > 1 {
-				fmt.Fprintf(os.Stdout, " update at %v+%v\n", pos, mismatchPos)
-			}
 			lastNode.leafData = *data
 		} else {
 			// Make new child node
@@ -592,14 +561,8 @@ func (handle *Handle) Set(keyBytes *[KEY_BYTES]byte, value *[HASH_BYTES]byte) er
 			newNode.KeySubstring = key[pos+mismatchPos+1:]
 			newNode.leafData = *data
 			if mismatchPos == len(lastNode.KeySubstring) {
-				if dbg > 1 {
-					fmt.Fprintf(os.Stdout, " add at %v+%v\n", pos, mismatchPos)
-				}
 				lastNode.SetChild(int(key[pos+mismatchPos]), newNode)
 			} else {
-				if dbg > 1 {
-					fmt.Fprintf(os.Stdout, " split at %v+%v\n", pos, mismatchPos)
-				}
 				// Split node: allocate second child node
 				splitNode, err := handle.newNode(pos + mismatchPos + 1)
 				if err != nil {
@@ -657,28 +620,13 @@ func (handle *Handle) GetRootHash() (*[HASH_BYTES]byte, error) {
 }
 
 func (lookup *LookupResult) ComputeRootHash() []byte {
-	if dbg > 0 {
-		fmt.Fprintf(os.Stdout, "computing root hash\n")
-	}
 	hash := lookup.Hash[:]
-	if dbg > 0 {
-		fmt.Fprintf(os.Stdout, "leaf hash: %x\n", hash)
-	}
 	for i := len(lookup.SiblingHashes) - 1; i >= 0; i-- {
 		siblingHash := lookup.SiblingHashes[i]
 		if siblingHash.IsLeftSibling {
-			if dbg > 0 {
-				fmt.Fprintf(os.Stdout, "left: ")
-			}
 			hash = Hash(append(siblingHash.Hash, hash...))[:]
 		} else {
-			if dbg > 0 {
-				fmt.Fprintf(os.Stdout, "right: ")
-			}
 			hash = Hash(append(hash, siblingHash.Hash...))[:]
-		}
-		if dbg > 1 {
-			fmt.Fprintf(os.Stdout, "new hash: %x\n", hash)
 		}
 	}
 	return hash

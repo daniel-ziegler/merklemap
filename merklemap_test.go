@@ -10,6 +10,7 @@ import (
 	"code.google.com/p/goprotobuf/proto"
 )
 
+const dbg = 0
 
 func TestMarshalUnmarshalLookupResult(t *testing.T) {
 	tree, err := Open("tree.dat")
