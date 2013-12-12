@@ -1,12 +1,60 @@
 package merklemap
 
 import (
+	"testing"
 	"bytes"
 	"fmt"
 	"math/rand"
 	"os"
-	"testing"
+	"reflect"
+	"code.google.com/p/goprotobuf/proto"
 )
+
+
+func TestMarshalUnmarshalLookupResult(t *testing.T) {
+	tree, err := Open("tree.dat")
+	snapshot := tree.GetSnapshot(0)
+	handle, err := snapshot.OpenHandle()
+	if err != nil {
+		panic(err)
+	}
+	key := [32]byte{1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
+	val := [32]byte{31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16}
+	err = handle.Set(&key, &val)
+	if err != nil {
+		panic(err)
+	}
+	key[31]++; val[31]++;
+	err = handle.Set(&key, &val)
+	if err != nil {
+		panic(err)
+	}
+	key[30]++; val[30]++;
+	err = handle.Set(&key, &val)
+	if err != nil {
+		panic(err)
+	}
+	key[30]--; val[30]--;
+	path, err := handle.GetPath(&key)
+	if err != nil {
+		panic(err)
+	}
+	bs, err := proto.Marshal(path)
+	if err != nil {
+		panic(err)
+	}
+	path2 := new(LookupResult)
+	err = proto.Unmarshal(bs, path2)
+	if err != nil {
+		panic(err)
+	}
+	if !reflect.DeepEqual(path, path2) {
+		t.Fatal("Lookup results not equal after a marshal roundtrip")
+	}
+	if !bytes.Equal(path.ComputeRootHash(), path2.ComputeRootHash()) {
+		t.Fatal("Root hashes not equal after a marshal roundtrip")
+	}
+}
 
 func TestRandomly(t *testing.T) {
 	bestTime := 100000
