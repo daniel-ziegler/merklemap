@@ -13,42 +13,42 @@ var _ = proto.Marshal
 var _ = &json.SyntaxError{}
 var _ = math.Inf
 
-type LookupResultPb struct {
-	LeafValue        []byte   `protobuf:"bytes,1,opt,name=leaf_value" json:"leaf_value,omitempty"`
-	LeafKVHash       []byte   `protobuf:"bytes,2,opt,name=leaf_k_v_hash" json:"leaf_k_v_hash,omitempty"`
-	IsLeftSibling    []bool   `protobuf:"varint,3,rep,name=is_left_sibling" json:"is_left_sibling,omitempty"`
-	SiblingHash      [][]byte `protobuf:"bytes,4,rep,name=sibling_hash" json:"sibling_hash,omitempty"`
-	XXX_unrecognized []byte   `json:"-"`
+type SiblingHash struct {
+	Hash             []byte `protobuf:"bytes,1,req,name=hash" json:"hash,omitempty"`
+	IsLeftSibling    *bool  `protobuf:"varint,2,req,name=is_left_sibling" json:"is_left_sibling,omitempty"`
+	XXX_unrecognized []byte `json:"-"`
 }
 
-func (m *LookupResultPb) Reset()         { *m = LookupResultPb{} }
-func (m *LookupResultPb) String() string { return proto.CompactTextString(m) }
-func (*LookupResultPb) ProtoMessage()    {}
+func (m *SiblingHash) Reset()         { *m = SiblingHash{} }
+func (m *SiblingHash) String() string { return proto.CompactTextString(m) }
+func (*SiblingHash) ProtoMessage()    {}
 
-func (m *LookupResultPb) GetLeafValue() []byte {
+func (m *SiblingHash) GetHash() []byte {
 	if m != nil {
-		return m.LeafValue
+		return m.Hash
 	}
 	return nil
 }
 
-func (m *LookupResultPb) GetLeafKVHash() []byte {
-	if m != nil {
-		return m.LeafKVHash
+func (m *SiblingHash) GetIsLeftSibling() bool {
+	if m != nil && m.IsLeftSibling != nil {
+		return *m.IsLeftSibling
 	}
-	return nil
+	return false
 }
 
-func (m *LookupResultPb) GetIsLeftSibling() []bool {
-	if m != nil {
-		return m.IsLeftSibling
-	}
-	return nil
+type MerklePath struct {
+	SiblingHashes    []*SiblingHash `protobuf:"bytes,1,rep,name=sibling_hashes" json:"sibling_hashes,omitempty"`
+	XXX_unrecognized []byte         `json:"-"`
 }
 
-func (m *LookupResultPb) GetSiblingHash() [][]byte {
+func (m *MerklePath) Reset()         { *m = MerklePath{} }
+func (m *MerklePath) String() string { return proto.CompactTextString(m) }
+func (*MerklePath) ProtoMessage()    {}
+
+func (m *MerklePath) GetSiblingHashes() []*SiblingHash {
 	if m != nil {
-		return m.SiblingHash
+		return m.SiblingHashes
 	}
 	return nil
 }

@@ -12,7 +12,7 @@ import (
 
 const dbg = 0
 
-func TestMarshalUnmarshalLookupResult(t *testing.T) {
+func TestMarshalUnmarshalMerklePath(t *testing.T) {
 	tree, err := Open("tree.dat")
 	snapshot := tree.GetSnapshot(0)
 	handle, err := snapshot.OpenHandle()
@@ -36,7 +36,7 @@ func TestMarshalUnmarshalLookupResult(t *testing.T) {
 		panic(err)
 	}
 	key[30]--; val[30]--;
-	path, err := handle.GetPath(&key)
+	_, path, err := handle.GetPath(&key)
 	if err != nil {
 		panic(err)
 	}
@@ -44,7 +44,7 @@ func TestMarshalUnmarshalLookupResult(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	path2 := new(LookupResult)
+	path2 := new(MerklePath)
 	err = proto.Unmarshal(bs, path2)
 	if err != nil {
 		panic(err)
@@ -52,7 +52,7 @@ func TestMarshalUnmarshalLookupResult(t *testing.T) {
 	if !reflect.DeepEqual(path, path2) {
 		t.Fatal("Lookup results not equal after a marshal roundtrip")
 	}
-	if !bytes.Equal(path.ComputeRootHash(), path2.ComputeRootHash()) {
+	if !bytes.Equal(path.ComputeRootHash(&key, &val), path2.ComputeRootHash(&key, &val)) {
 		t.Fatal("Root hashes not equal after a marshal roundtrip")
 	}
 }
@@ -159,14 +159,11 @@ func mapTest(tree *Map, itCount int, byteRange int, opn int) int {
 		if dbg > 2 {
 			fmt.Fprintf(os.Stdout, "read [%x]...\n", key)
 		}
-		result, err := handle.GetPath(&key)
+		val, result, err := handle.GetPath(&key)
 		if err != nil {
 			panic(err)
 		}
-		var val [32]byte
-		if result == nil {
-			val = [32]byte{}
-		} else {
+		if result != nil {
 			rootHash, err := handle.GetRootHash()
 			if err != nil {
 				panic(err)
@@ -174,16 +171,19 @@ func mapTest(tree *Map, itCount int, byteRange int, opn int) int {
 			if dbg > 1 {
 				fmt.Fprintf(os.Stdout, "Lookup: %x\n", result)
 			}
-			computedRootHash := result.ComputeRootHash()
+			computedRootHash := result.ComputeRootHash(&key, val)
 			if !bytes.Equal(computedRootHash, rootHash[:]) {
 				panic(fmt.Sprintf("bad root hash: %x != %x", computedRootHash, rootHash))
 			}
-			val = result.Value
 		}
 		if dbg > 1 {
 			fmt.Fprintf(os.Stdout, "read [%x] = %x\n", key, val)
 		}
-		return val
+		if val == nil {
+			return [32]byte{}
+		} else {
+			return *val
+		}
 	}
 	for i := 0; i < itCount; i++ {
 		if i%1000 == 0 {

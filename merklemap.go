@@ -7,8 +7,6 @@ import (
 	"io"
 	"os"
 	"sync"
-	"errors"
-	"code.google.com/p/goprotobuf/proto"
 )
 
 func assert(flag bool) {
@@ -343,63 +341,6 @@ func (handle *Handle) newNode(keyOffset int) (*node, error) {
 	return n, nil
 }
 
-type SiblingHash struct {
-	Hash          []byte
-	IsLeftSibling bool // whether the hashed sibling was to the left of the original node on the path
-}
-
-type LookupResult struct {
-	leafData
-	SiblingHashes []SiblingHash
-}
-
-func (lr *LookupResult) AsProto() *LookupResultPb {
-	siblingParities := make([]bool, len(lr.SiblingHashes))
-	siblingHashes := make([][]byte, len(lr.SiblingHashes))
-	for i, sh_s := range lr.SiblingHashes {
-		siblingParities[i] = sh_s.IsLeftSibling
-		siblingHashes[i] = sh_s.Hash
-	}
-	return &LookupResultPb{
-		LeafValue: lr.Value[:],
-		LeafKVHash: lr.Hash[:],
-		IsLeftSibling: siblingParities,
-		SiblingHash: siblingHashes}
-}
-
-func (lr *LookupResult) ProtoMessage() {}
-func (lr *LookupResult) Reset() {
-	*lr = LookupResult{}
-}
-
-func (lr *LookupResult) String() string {
-	return lr.AsProto().String()
-}
-
-func (lr *LookupResult) Marshal() (ret []byte, err error) {
-	ret, err = proto.Marshal(lr.AsProto())
-	return
-}
-
-func (lr *LookupResult) Unmarshal(bs []byte) (err error) {
-	pb := new(LookupResultPb)
-	err = proto.Unmarshal(bs, pb)
-	if err != nil {
-		return
-	}
-	if len(pb.SiblingHash) != len(pb.IsLeftSibling) {
-		return errors.New("len(pb.SiblingHash) != len(pb.IsLeftSibling)")
-	}
-	lr.SiblingHashes = make([]SiblingHash, len(pb.SiblingHash))
-	for i := range pb.SiblingHash {
-		lr.SiblingHashes[i].IsLeftSibling = pb.IsLeftSibling[i]
-		lr.SiblingHashes[i].Hash = pb.SiblingHash[i]
-	}
-	copy(lr.Value[:], pb.LeafValue[:len(lr.Value)])
-	copy(lr.Hash[:], pb.LeafKVHash[:len(lr.Hash)])
-	return nil
-}
-
 func firstMismatch(slice1 []byte, slice2 []byte) int {
 	shorterLen := min(len(slice1), len(slice2))
 	for i := 0; i < shorterLen; i++ {
@@ -459,16 +400,18 @@ func (handle *Handle) partialLookup(key []byte) ([]*node, int, int, error) {
 	}
 }
 
-func (handle *Handle) GetPath(keyBytes *[KEY_BYTES]byte) (*LookupResult, error) {
+func (handle *Handle) GetPath(keyBytes *[KEY_BYTES]byte) (
+	value *[HASH_BYTES]byte, path *MerklePath, err error,
+) {
 	key := bytesToElements(keyBytes[:])
 	nodes, pos, _, err := handle.partialLookup(key)
 	if err != nil {
-		return nil, err
+		return
 	}
 	if len(nodes) == 0 || pos != KEY_ELEMENTS {
-		return nil, nil
+		return
 	}
-	pathHashes := make([]SiblingHash, 0)
+	pathHashes := make([]*SiblingHash, 0)
 	for _, n := range nodes {
 		for j := 0; j < ELEMENT_BITS; j++ {
 			keyIx := n.KeyOffset + len(n.KeySubstring)
@@ -481,15 +424,17 @@ func (handle *Handle) GetPath(keyBytes *[KEY_BYTES]byte) (*LookupResult, error) 
 			if hashNode.HasTwoChildren {
 				siblingSide := int(1 - ((elem >> uint(ELEMENT_BITS-j-1)) & 1))
 				siblingNode := n.getHashNode(hnIx*2 + 1 + siblingSide)
-				pathHashes = append(pathHashes, SiblingHash{
+				isLeftSibling := siblingSide == 0
+				pathHashes = append(pathHashes, &SiblingHash{
 					Hash:          siblingNode.Hash,
-					IsLeftSibling: siblingSide == 0,
+					IsLeftSibling: &isLeftSibling,
 				})
 			}
 		}
 	}
-	result := &LookupResult{leafData: nodes[len(nodes)-1].leafData, SiblingHashes: pathHashes}
-	return result, nil
+	value = &nodes[len(nodes)-1].Value
+	path = &MerklePath{SiblingHashes: pathHashes}
+	return
 }
 
 func (handle *Handle) updatePath(path []*node) error {
@@ -619,11 +564,11 @@ func (handle *Handle) GetRootHash() (*[HASH_BYTES]byte, error) {
 	}
 }
 
-func (lookup *LookupResult) ComputeRootHash() []byte {
-	hash := lookup.Hash[:]
-	for i := len(lookup.SiblingHashes) - 1; i >= 0; i-- {
-		siblingHash := lookup.SiblingHashes[i]
-		if siblingHash.IsLeftSibling {
+func (path *MerklePath) ComputeRootHash(key *[HASH_BYTES]byte, value *[HASH_BYTES]byte) []byte {
+	hash := Hash(append(key[:], value[:]...))[:]
+	for i := len(path.SiblingHashes) - 1; i >= 0; i-- {
+		siblingHash := path.SiblingHashes[i]
+		if *siblingHash.IsLeftSibling {
 			hash = Hash(append(siblingHash.Hash, hash...))[:]
 		} else {
 			hash = Hash(append(hash, siblingHash.Hash...))[:]
